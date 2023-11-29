@@ -1,0 +1,244 @@
+{# For better readability the trailing comma after last array element `, ]` is allowed. Comma is removed in TemplateProcessor.php #}
+{
+    "track_total_hits": true,
+    "query": {
+        "bool": {
+            "must": [
+                {% if search_phrase|default(null) is not empty %}
+                {
+                    "dis_max": {
+                        "queries": [
+                            {
+                                "match": {
+                                    "fulltext_hq": {
+                                        "minimum_should_match": "100%",
+                                        "operator": "and",
+                                        "analyzer": "full_text_analyzer",
+                                        "query": "{{ search_phrase }}"
+                                    }
+                                }
+                            },
+                            {
+                                "match": {
+                                    "fulltext_lq": {
+                                        "minimum_should_match": "100%",
+                                        "operator": "and",
+                                        "analyzer": "full_text_analyzer",
+                                        "query": "{{ search_phrase }}",
+                                        "boost": 0.5
+                                    }
+                                }
+                            },
+                            {
+                                "function_score": {
+                                    "boost_mode": "replace",
+                                    "query": {
+                                        "term": {
+                                            "order_number": {
+                                                "value": "{{ search_phrase }}"
+                                            }
+                                        }
+                                    },
+                                    "boost": 1000
+                                }
+                            },
+                            {
+                                "function_score": {
+                                    "boost_mode": "replace",
+                                    "query": {
+                                        "bool": {
+                                            "should": [
+                                                {
+                                                    "term": {
+                                                        "user_sso_id": {
+                                                            "value": "{{ search_phrase }}"
+                                                        }
+                                                    }
+                                                },
+                                                {
+                                                    "term": {
+                                                        "payment_foreign_uuid": {
+                                                            "value": "{{ search_phrase }}"
+                                                        }
+                                                    }
+                                                },
+                                                {
+                                                    "term": {
+                                                        "user_number": {
+                                                            "value": "{{ search_phrase }}"
+                                                        }
+                                                    }
+                                                },
+                                                {
+                                                    "nested": {
+                                                        "path": "positions",
+                                                        "query": {
+                                                            "term": {
+                                                                "positions.product_id": {
+                                                                    "value": "{{ search_phrase }}"
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                },
+                                                {
+                                                    "term": {
+                                                        "payment_vouchers": {
+                                                            "value": "{{ search_phrase }}"
+                                                        }
+                                                    }
+                                                },
+                                                {
+                                                    "nested": {
+                                                        "path": "positions",
+                                                        "query": {
+                                                            "term": {
+                                                                "positions.payment_service_provider_reference": {
+                                                                    "value": "{{ search_phrase }}"
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            ]
+                                        }
+                                    },
+                                    "boost": 500
+                                }
+                            },
+                            {
+                                "function_score": {
+                                    "boost_mode": "replace",
+                                    "query": {
+                                        "match": {
+                                            "address_full_name": {
+                                                "minimum_should_match": "100%",
+                                                "operator": "and",
+                                                "analyzer": "full_text_analyzer",
+                                                "query": "{{ search_phrase }}"
+                                            }
+                                        }
+                                    },
+                                    "boost": 100
+                                }
+                            }
+                        ]
+                    }
+                }
+                {% endif %}
+            ],
+            "filter": [
+                {# Filter "Vertical" #}
+                {% if vertical_ids|default([]) is not empty %}
+                {
+                    "nested": {
+                        "path": "positions",
+                        "query": {
+                            "terms": {
+                                "positions.vertical_id": [
+                                    {% for vertical_id in vertical_ids %}
+                                    "{{ vertical_id }}",
+                                    {% endfor %}
+                                ]
+                            }
+                        }
+                    }
+                },
+                {% endif %}
+
+                {# Filter "Shop" #}
+                {% if filters.shops|default([]) is not empty %}
+                {
+                    "nested": {
+                        "path": "positions",
+                        "query": {
+                            "terms": {
+                                "positions.shop_foreign_id": [
+                                    {% for shop_foreign_id in filters.shops %}
+                                    "{{ shop_foreign_id }}",
+                                    {% endfor %}
+                                ]
+                            }
+                        }
+                    }
+                },
+                {% endif %}
+
+                {# Filter "Bestellstatus" #}
+                {% if filters.orderStatuses|default([]) is not empty %}
+                {
+                    "nested": {
+                        "path": "positions",
+                        "query": {
+                            "terms": {
+                                "positions.order_status": [
+                                    {% for order_status in filters.orderStatuses %}
+                                    "{{ order_status.value }}",
+                                    {% endfor %}
+                                ]
+                            }
+                        }
+                    }
+                },
+                {% endif %}
+
+                {# Filter "Zahlungsart" #}
+                {% if filters.paymentTypes|default([]) is not empty %}
+                {
+                    "terms": {
+                        "payment_type": [
+                            {% for payment_type in filters.paymentTypes %}
+                            "{{ payment_type }}",
+                            {% endfor %}
+                        ]
+                    }
+                },
+                {% endif %}
+
+                {# Filter "Product Category" #}
+                {% if filters.productCategories|default([]) is not empty %}
+                {
+                    "nested": {
+                        "path": "positions",
+                        "query": {
+                            "terms": {
+                                "positions.product_category_id": [
+                                    {% for product_category_id in filters.productCategories %}
+                                    "{{ product_category_id }}",
+                                    {% endfor %}
+                                ]
+                            }
+                        }
+                    }
+                },
+                {% endif %}
+
+                {# Filter "Bestellzeitraum" #}
+                {% set filterDateFrom = filters.from|default(null) %}
+                {% set filterDateTo = filters.to|default(null) %}
+                {% if filterDateFrom is not empty or filterDateTo is not empty %}
+                {
+                    "range" : {
+                        "created_at" : {
+                            {% if filterDateFrom %}
+                                "gte" : "{{ filterDateFrom|date("Y-m-d") }}",
+                            {% endif %}
+                            {% if filterDateTo %}
+                                "lte" : "{{ filterDateTo|date("Y-m-d") }}",
+                            {% endif %}
+                            "format": "yyyy-MM-dd"
+                        }
+                    }
+                },
+                {% endif %}
+            ]
+        }
+    },
+    "size": "{{ size }}",
+    "from": "{{ (page - 1) * size }}",
+    "sort": {
+        {% if sort is not empty %}
+        "{{ sort.field }}": "{{ sort.type }}"
+        {% endif %}
+    }
+}
